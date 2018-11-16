@@ -125,7 +125,7 @@ import Database.LMDB.Simple.Internal
   , Environment (Env)
   , Transaction (Txn)
   , Database (Db)
-  , Serialise
+  , Serialize
   , isReadOnlyEnvironment
   , isReadOnlyTransaction
   , isReadWriteTransaction
@@ -330,13 +330,13 @@ getDatabase name = tx
 
 -- | Lookup a key in a database and return the corresponding value, or return
 -- 'Nothing' if the key does not exist in the database.
-get :: (Serialise k, Serialise v)
+get :: (Serialize k, Serialize v)
     => Database k v -> k -> Transaction mode (Maybe v)
 get = Internal.get
 
 -- | Insert the given key/value pair into a database, or delete the key from
 -- the database if 'Nothing' is given for the value.
-put :: (Serialise k, Serialise v)
+put :: (Serialize k, Serialize v)
     => Database k v -> k -> Maybe v -> Transaction ReadWrite ()
 put db key = maybe (void $ Internal.delete db key) (Internal.put db key)
 

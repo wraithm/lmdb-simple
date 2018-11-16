@@ -43,7 +43,7 @@ library
   build-depends:       base >= 4.7 && < 5
                      , bytestring >= 0.10 && < 0.11
                      , lmdb >= 0.2 && < 0.3
-                     , serialise >= 0.2 && < 0.3
+                     , cereal >= 0.5 && < 0.6
   ghc-options:         -Wall -Wno-name-shadowing -Wno-unused-do-bind
   default-language:    Haskell2010
   default-extensions:  Trustworthy

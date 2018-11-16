@@ -34,8 +34,8 @@ import Database.LMDB.Simple.Internal
   , Database (..)
   , ReadWrite
   , ReadOnly
-  , Serialise
-  , serialiseBS
+  , Serialize
+  , encode
   , getBS
   , putBS
   , deleteBS
@@ -53,39 +53,39 @@ data DBRef mode a = Ref (Environment mode) MDB_dbi' ByteString
 
 -- | Create a new 'DBRef' for the given key and database within the given
 -- environment.
-newDBRef :: Serialise k
+newDBRef :: Serialize k
          => Environment mode -> Database k a -> k -> IO (DBRef mode a)
-newDBRef env (Db _ dbi) = return . Ref env dbi . serialiseBS
+newDBRef env (Db _ dbi) = return . Ref env dbi . encode
 
 -- | Read the current value of a 'DBRef'.
-readDBRef :: Serialise a => DBRef mode a -> IO (Maybe a)
+readDBRef :: Serialize a => DBRef mode a -> IO (Maybe a)
 readDBRef ref@(Ref env dbi key) = transaction env (tx env ref)
 
-  where tx :: Serialise a
+  where tx :: Serialize a
            => Environment mode -> DBRef mode a -> Transaction ReadOnly (Maybe a)
         tx (Env env) _ = getBS (Db env dbi) key
 
 -- | Write a new value into a 'DBRef'.
-writeDBRef :: Serialise a => DBRef ReadWrite a -> Maybe a -> IO ()
+writeDBRef :: Serialize a => DBRef ReadWrite a -> Maybe a -> IO ()
 writeDBRef (Ref env dbi key) = transaction env . maybe (delKey env) (putKey env)
 
   where delKey :: Environment ReadWrite -> Transaction ReadWrite ()
         delKey (Env env) = void $ deleteBS (Db env dbi) key
 
-        putKey :: Serialise a
+        putKey :: Serialize a
                => Environment ReadWrite -> a -> Transaction ReadWrite ()
         putKey (Env env) = putBS (Db env dbi) key
 
 -- | Atomically mutate the contents of a 'DBRef'.
-modifyDBRef_ :: Serialise a => DBRef ReadWrite a -> (Maybe a -> Maybe a) -> IO ()
+modifyDBRef_ :: Serialize a => DBRef ReadWrite a -> (Maybe a -> Maybe a) -> IO ()
 modifyDBRef_ ref f = modifyDBRef ref $ \x -> (f x, ())
 
 -- | Atomically mutate the contents of a 'DBRef' and return a value.
-modifyDBRef :: Serialise a
+modifyDBRef :: Serialize a
             => DBRef ReadWrite a -> (Maybe a -> (Maybe a, b)) -> IO b
 modifyDBRef (Ref env dbi key) = transaction env . tx env
 
-  where tx :: Serialise a
+  where tx :: Serialize a
            => Environment mode -> (Maybe a -> (Maybe a, b))
            -> Transaction ReadWrite b
         tx (Env env) f = let db = Db env dbi in

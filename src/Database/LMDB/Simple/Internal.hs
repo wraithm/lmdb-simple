@@ -9,11 +9,10 @@ module Database.LMDB.Simple.Internal
   , Environment (..)
   , Transaction (..)
   , Database (..)
-  , Serialise
+  , Serialize
   , isReadOnlyEnvironment
   , isReadOnlyTransaction
   , isReadWriteTransaction
-  , serialiseBS
   , marshalOut
   , marshalIn
   , peekVal
@@ -30,12 +29,18 @@ module Database.LMDB.Simple.Internal
   , putBS
   , delete
   , deleteBS
+  , encode
   ) where
 
-import Codec.Serialise
-  ( Serialise
-  , serialise
-  , deserialise
+import Data.Serialize
+  ( Serialize
+  , encode
+  , encodeLazy
+  , decode
+  )
+
+import Data.Either
+  ( fromRight
   )
 
 import Control.Exception
@@ -63,8 +68,6 @@ import Data.ByteString.Unsafe
 
 import Data.ByteString.Lazy
   ( toChunks
-  , toStrict
-  , fromStrict
   )
 import qualified Data.ByteString.Lazy as BSL
 
@@ -162,27 +165,21 @@ instance Monad (Transaction mode) where
 instance MonadIO (Transaction mode) where
   liftIO = Txn . const
 
--- | A database maps arbitrary keys to values. This API uses the 'Serialise'
+-- | A database maps arbitrary keys to values. This API uses the 'Serialize'
 -- class to encode and decode keys and values for LMDB to store on disk. For
 -- details on creating your own instances of this class, see
--- "Codec.Serialise.Tutorial".
+-- "Data.Serialize".
 data Database k v = Db MDB_env MDB_dbi'
 
-peekVal :: Serialise v => Ptr MDB_val -> IO v
+peekVal :: Serialize v => Ptr MDB_val -> IO v
 peekVal = peek >=> marshalIn
 
-serialiseLBS :: Serialise v => v -> BSL.ByteString
-serialiseLBS = serialise
-
-serialiseBS :: Serialise v => v -> BS.ByteString
-serialiseBS = toStrict . serialiseLBS
-
-marshalIn :: Serialise v => MDB_val -> IO v
+marshalIn :: Serialize v => MDB_val -> IO v
 marshalIn (MDB_val len ptr) =
-  deserialise . fromStrict <$> packCStringLen (castPtr ptr, fromIntegral len)
+  fromRight (error "could not parse") . decode <$> packCStringLen (castPtr ptr, fromIntegral len)
 
-marshalOut :: Serialise v => v -> (MDB_val -> IO a) -> IO a
-marshalOut = marshalOutBS . serialiseBS
+marshalOut :: Serialize v => v -> (MDB_val -> IO a) -> IO a
+marshalOut = marshalOutBS . encode
 
 marshalOutBS :: BS.ByteString -> (MDB_val -> IO a) -> IO a
 marshalOutBS bs f =
@@ -223,37 +220,34 @@ defaultWriteFlags, overwriteFlags :: MDB_WriteFlags
 defaultWriteFlags = compileWriteFlags []
 overwriteFlags    = compileWriteFlags [MDB_CURRENT]
 
-get :: (Serialise k, Serialise v)
-    => Database k v -> k -> Transaction mode (Maybe v)
-get db = getBS db . serialiseBS
+get :: (Serialize k, Serialize v) => Database k v -> k -> Transaction mode (Maybe v)
+get db = getBS db . encode
 
-get' :: Serialise k => Database k v -> k -> Transaction mode (Maybe MDB_val)
-get' db = getBS' db . serialiseBS
+get' :: Serialize k => Database k v -> k -> Transaction mode (Maybe MDB_val)
+get' db = getBS' db . encode
 
-getBS :: Serialise v
-      => Database k v -> BS.ByteString -> Transaction mode (Maybe v)
-getBS db keyBS = getBS' db keyBS >>=
-  maybe (return Nothing) (liftIO . fmap Just . marshalIn)
+getBS :: Serialize v => Database k v -> BS.ByteString -> Transaction mode (Maybe v)
+getBS db keyBS = getBS' db keyBS >>= maybe (return Nothing) (liftIO . fmap Just . marshalIn)
 
 getBS' :: Database k v -> BS.ByteString -> Transaction mode (Maybe MDB_val)
 getBS' (Db _ dbi) keyBS = Txn $ \txn -> marshalOutBS keyBS $ mdb_get' txn dbi
 
-put :: (Serialise k, Serialise v)
+put :: (Serialize k, Serialize v)
     => Database k v -> k -> v -> Transaction ReadWrite ()
-put db = putBS db . serialiseBS
+put db = putBS db . encode
 
-putBS :: Serialise v
+putBS :: Serialize v
      => Database k v -> BS.ByteString -> v -> Transaction ReadWrite ()
 putBS (Db _ dbi) keyBS value = Txn $ \txn ->
   marshalOutBS keyBS $ \kval -> do
-  let valueLBS = serialiseLBS value
+  let valueLBS = encodeLazy value
       sz = fromIntegral (BSL.length valueLBS)
   MDB_val len ptr <- mdb_reserve' defaultWriteFlags txn dbi kval sz
   let len' = fromIntegral len
   assert (len' == sz) $ copyLazyBS valueLBS ptr len'
 
-delete :: Serialise k => Database k v -> k -> Transaction ReadWrite Bool
-delete db = deleteBS db . serialiseBS
+delete :: Serialize k => Database k v -> k -> Transaction ReadWrite Bool
+delete db = deleteBS db . encode
 
 deleteBS :: Database k v -> BS.ByteString -> Transaction ReadWrite Bool
 deleteBS (Db _ dbi) key = Txn $ \txn ->

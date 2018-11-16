@@ -76,7 +76,7 @@ import Database.LMDB.Simple
 
 import Database.LMDB.Simple.Internal
   ( Database (Db)
-  , Serialise
+  , Serialize
   , forEachForward
   , forEachReverse
   , marshalOut
@@ -133,22 +133,22 @@ size view = viewIO view $ \(txn, dbi) -> do
   return (fromIntegral $ ms_entries stat)
 
 -- | Is the key a member of the view? See also 'notMember'.
-member :: Serialise k => k -> View k v -> Bool
+member :: Serialize k => k -> View k v -> Bool
 member key view = viewIO view $ \(txn, dbi) ->
   marshalOut key $ \kval -> isJust <$> mdb_get' txn dbi kval
 
 -- | Is the key not a member of the view? See also 'member'.
-notMember :: Serialise k => k -> View k v -> Bool
+notMember :: Serialize k => k -> View k v -> Bool
 notMember key view = not (member key view)
 
 -- | Find the value at a key. Calls 'error' when the element can not be found.
-(!) :: (Serialise k, Serialise v) => View k v -> k -> v
+(!) :: (Serialize k, Serialize v) => View k v -> k -> v
 view ! key = fromMaybe notFoundError $ lookup key view
   where notFoundError = error "View.!: given key is not found in the database"
 infixl 9 !
 
 -- | Find the value at a key. Returns 'Nothing' when the element can not be found.
-(!?) :: (Serialise k, Serialise v) => View k v -> k -> Maybe v
+(!?) :: (Serialize k, Serialize v) => View k v -> k -> Maybe v
 (!?) = flip lookup
 infixl 9 !?
 
@@ -156,18 +156,18 @@ infixl 9 !?
 --
 -- The function will return the corresponding value as @('Just' value)@, or
 -- 'Nothing' if the key isn't in the view.
-lookup :: (Serialise k, Serialise v) => k -> View k v -> Maybe v
+lookup :: (Serialize k, Serialize v) => k -> View k v -> Maybe v
 lookup key view = viewIO view $ \(txn, dbi) -> marshalOut key $
   mdb_get' txn dbi >=> maybe (return Nothing) (fmap Just . marshalIn)
 
 -- | The expression @('findWithDefault' def k view)@ returns the value at key
 -- @k@ or returns default value @def@ when the key is not in the view.
-findWithDefault :: (Serialise k, Serialise v) => v -> k -> View k v -> v
+findWithDefault :: (Serialize k, Serialize v) => v -> k -> View k v -> v
 findWithDefault def key = fromMaybe def . lookup key
 
 -- | Fold the values in the view using the given right-associative binary
 -- operator, such that @'foldr' f z == 'Prelude.foldr' f z . 'elems'@.
-foldr :: Serialise v => (v -> b -> b) -> b -> View k v -> b
+foldr :: Serialize v => (v -> b -> b) -> b -> View k v -> b
 foldr f z view = viewIO view $ \(txn, dbi) ->
   alloca $ \vptr ->
   forEachForward txn dbi nullPtr vptr z $ \rest ->
@@ -176,7 +176,7 @@ foldr f z view = viewIO view $ \(txn, dbi) ->
 -- | Fold the keys and values in the view using the given right-associative
 -- binary operator, such that @'foldrWithKey' f z == 'Prelude.foldr'
 -- ('uncurry' f) z . 'toList'@.
-foldrWithKey :: (Serialise k, Serialise v)
+foldrWithKey :: (Serialize k, Serialize v)
              => (k -> v -> b -> b) -> b -> View k v -> b
 foldrWithKey f z view = viewIO view $ \(txn, dbi) ->
   alloca $ \kptr ->
@@ -186,7 +186,7 @@ foldrWithKey f z view = viewIO view $ \(txn, dbi) ->
 
 -- | Fold the values in the view using the given left-associative binary
 -- operator, such that @'foldl' f z == 'Prelude.foldl' f z . 'elems'@.
-foldl :: Serialise v => (a -> v -> a) -> a -> View k v -> a
+foldl :: Serialize v => (a -> v -> a) -> a -> View k v -> a
 foldl f z view = viewIO view $ \(txn, dbi) ->
   alloca $ \vptr ->
   forEachReverse txn dbi nullPtr vptr z $ \rest ->
@@ -195,7 +195,7 @@ foldl f z view = viewIO view $ \(txn, dbi) ->
 -- | Fold the keys and values in the view using the given left-associative
 -- binary operator, such that @'foldlWithKey' f z == 'Prelude.foldl' (\\z'
 -- (kx, x) -> f z' kx x) z . 'toList'@.
-foldlWithKey :: (Serialise k, Serialise v)
+foldlWithKey :: (Serialize k, Serialize v)
              => (a -> k -> v -> a) -> a -> View k v -> a
 foldlWithKey f z view = viewIO view $ \(txn, dbi) ->
   alloca $ \kptr ->
@@ -204,22 +204,22 @@ foldlWithKey f z view = viewIO view $ \(txn, dbi) ->
   (\k v a -> f a k v) <$> peekVal kptr <*> peekVal vptr <*> rest
 
 -- | Fold the keys and values in the view using the given monoid.
-foldViewWithKey :: (Monoid m, Serialise k, Serialise v)
+foldViewWithKey :: (Monoid m, Serialize k, Serialize v)
                 => (k -> v -> m) -> View k v -> m
 foldViewWithKey f = foldrWithKey (\k v a -> f k v `mappend` a) mempty
 
 -- | Return all elements of the view in the order of their keys.
-elems :: Serialise v => View k v -> [v]
+elems :: Serialize v => View k v -> [v]
 elems = foldr (:) []
 
 -- | Return all keys of the view in the order they are stored in the
 -- underlying LMDB database.
-keys :: Serialise k => View k v -> [k]
+keys :: Serialize k => View k v -> [k]
 keys view = viewIO view $ \(txn, dbi) ->
   alloca $ \kptr ->
   forEachForward txn dbi kptr nullPtr [] $ \rest ->
   (:) <$> peekVal kptr <*> rest
 
 -- | Convert the view to a list of key/value pairs.
-toList :: (Serialise k, Serialise v) => View k v -> [(k, v)]
+toList :: (Serialize k, Serialize v) => View k v -> [(k, v)]
 toList = foldrWithKey (\k v -> ((k, v) :)) []
